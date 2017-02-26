@@ -2,6 +2,9 @@ package mapreduce
 
 import (
 	"hash/fnv"
+	"io/ioutil"
+	"os"
+	"encoding/json"
 )
 
 // doMap manages one map task: it reads one of the input files
@@ -14,6 +17,49 @@ func doMap(
 	nReduce int, // the number of reduce task that will be run ("R" in the paper)
 	mapF func(file string, contents string) []KeyValue,
 ) {
+	//fmt.Println("jobName: ", jobName);
+	//fmt.Println("mapTaskNumber: ", mapTaskNumber);
+	//fmt.Println("inFile: ", inFile);
+	//fmt.Println("nReduce: ", nReduce);
+
+	
+
+	dat, err := ioutil.ReadFile(inFile); //read file and dump to variable
+	if err != nil {
+		panic(err)
+	}
+	fileContent := string(dat)
+
+	slice := mapF(inFile, fileContent);
+
+	rMapping := make(map[int][]KeyValue);
+
+	for _, kv := range slice {
+		keyhash := ihash(string(kv.Key));
+		r := keyhash % nReduce
+
+		rMapping[r] = append(rMapping[r], kv);
+	}
+
+	for r, klist := range rMapping {
+		intermediateFileName := reduceName(jobName, mapTaskNumber, r);
+		//fmt.Println("intermName: ", intermediateFileName);
+		//fmt.Println("klist", klist);
+
+		//jsonMap, _ := json.Marshal(klist);
+		//fmt.Println(string(jsonMap))
+
+		fo, err := os.Create(intermediateFileName)
+		if err != nil {
+			panic(err)
+		}
+		defer fo.Close()
+		enc := json.NewEncoder(fo)
+		if err := enc.Encode(klist); err != nil {
+			panic(err)
+		}
+	}
+
 	//
 	// You will need to write this function.
 	//
