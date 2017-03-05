@@ -498,7 +498,14 @@ func (rf *Raft) transmitAppendEntries(peerIndex int, args *AppendEntriesArgs) Ap
 //
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	rf.mu.Lock();
-	index := rf.commitIndex+1;
+	//index := rf.commitIndex+1; //what was my reason for using rf.commitIndex+1 again?
+
+
+	index := len(rf.log);
+	if index < 0 {
+		index = 0;
+	}
+
 	term := rf.currentTerm;
 	rf.mu.Unlock();
 	isLeader := true;
