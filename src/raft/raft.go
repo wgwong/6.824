@@ -350,7 +350,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	rf.lock();
 	defer rf.unlock();
 	rfTerm := rf.currentTerm;
-	//rfMe := rf.me;
 	//used for checking commitIndex
 	//rfCommitIndex := rf.commitIndex;
 	//rfLogLength := len(rf.log);
@@ -366,9 +365,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		if rfTerm > args.Term {
 			fmt.Println(rf.me, " has higher term (", rfTerm ,") than args/leader (", args.Term, ") for candidate: ", args.LeaderId);
 			fmt.Println("\trejecting due to rule 1 ");
-			//tempTerm, tempIsLeader := rf.GetState();
-			////fmt.Println("\tgetState for ", rf.me, ": term: ", tempTerm, ", isLeader: ", tempIsLeader);
-			////fmt.Println("\tstate: ", rf.state);
 			reply.Success = false;
 			return;
 		} else { // leader has higher term, squash any potential candidates/leaders
@@ -391,20 +387,20 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rfPrevLogTerm = rf.log[rfPrevLogIndex].Term;
 	}*/
 
-	if (rf.me == 1) {
-		//fmt.Println("1111 APPEND ENTRIES: args.PrevLogIndex: ", args.PrevLogIndex, " vs rfPrevLogIndex:", len(rf.log)-1);
-	}
 
 	//AppendEntries RPC Rule 2
 	if args.PrevLogIndex >= 0 {
 		if (args.PrevLogIndex > rfPrevLogIndex || rf.log[args.PrevLogIndex].Term != args.PrevLogTerm) {
+			
 				fmt.Println(rf.me, " rejected ", args.LeaderId, "due to Rule 2\n\tAppendEntriesArgs: ", args);
 				fmt.Println("\trfPrevLogIndex: ", rfPrevLogIndex);
 				fmt.Println("\targs.PrevLogIndex: ", args.PrevLogIndex);
 				fmt.Println("\t", rfPrevLogIndex >= args.PrevLogIndex)
+				/*
 				fmt.Println("\trfPrevLogTerm: ", rf.log[args.PrevLogIndex].Term);
 				fmt.Println("\targs.PrevLogTerm: ", args.PrevLogTerm);
 				fmt.Println("\t", rf.log[args.PrevLogIndex].Term == args.PrevLogTerm);
+				*/
 
 			reply.Success = false;
 
@@ -468,19 +464,15 @@ func (rf *Raft) transmitAppendEntries(peerIndex int, args *AppendEntriesArgs) Ap
 
 	rf.lock();
 	defer rf.unlock();
-	rfCurrentTerm := rf.currentTerm;
-	rfLog := make([] LogEntry, len(rf.log)); //OPTIMIZE
-	copy(rfLog, rf.log); //OPTIMIZE, ONLY NEED THIS IF APPEND ENTRY GETS REJECTED
 
 	//TODO, make sure snapshotted term = current term (make sure leader didn't become leader again later with a later term)
 	if rf.state == "leader" && successfulCall && len(args.Entries) > 0 { //only if not a heartbeat message
 		fmt.Println(rf.me, " successfully called append entries on ", peerIndex);
-		if rfCurrentTerm < finalReply.Term { //leader is outdated, revert to follower
+		if rf.currentTerm < finalReply.Term { //leader is outdated, revert to follower
 			fmt.Println("\tbut ", rf.me," outdated. reverted to follower");
 			rf.currentTerm = finalReply.Term;
 			rf.state = "follower";
 			rf.votedFor = -1;
-			////fmt.Println(rf.me, " reverted to state: ", rf.state);
 		} else {
 			if finalReply.Success {
 				updatedIndex := args.Entries[len(args.Entries)-1].Index;
@@ -500,7 +492,7 @@ func (rf *Raft) transmitAppendEntries(peerIndex int, args *AppendEntriesArgs) Ap
 				//fmt.Println("REJECTED rf.nextIndex[peerIndex] changed to: ", rf.nextIndex[peerIndex], ", with rf.log.length: ", len(rf.log));
 
 				//todo, continously retry with older entry maybe here too
-
+				//IDK if necessary, since we just wait for the next heartbeat (which is < 100 ms);
 			}
 		}
 
