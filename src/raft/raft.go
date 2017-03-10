@@ -89,7 +89,9 @@ type Raft struct {
 	//VOLATILE ON LEADERS
 	nextIndex[] int;
 	matchIndex[] int;
+
 }
+
 
 func min(x int, y int) int {
 	if x < y {
@@ -107,6 +109,16 @@ func max(x int, y int) int {
 	}
 }
 
+func (rf *Raft) lock() {
+	//fmt.Println("LOCK", rf.me, " acquiring lock");
+	rf.mu.Lock();
+}
+
+func (rf *Raft) unlock() {
+	//fmt.Println("UNLOCK", rf.me, " releasing lock");
+	rf.mu.Unlock();
+}
+
 // return currentTerm and whether this server
 // believes it is the leader.
 func (rf *Raft) GetState() (int, bool) {
@@ -114,10 +126,11 @@ func (rf *Raft) GetState() (int, bool) {
 	var term int
 	var isleader bool
 	// Your code here (2A).
-	rf.mu.Lock();
+	rf.lock();
 	term = (*rf).currentTerm;
 	isleader = (*rf).state == "leader";
-	rf.mu.Unlock();
+	//fmt.Println("GETSTATE()", rf.me, " is leader? ", isleader, " term: ", term);
+	rf.unlock();
 	return term, isleader;
 }
 
@@ -194,71 +207,71 @@ type AppendEntriesReply struct {
 //
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 
-	//////fmt.Println(args.CandidateId, " requestvote called on raft id: ", rf.me);
-	//////fmt.Println("\tstate: ", rf.state);
-	//////fmt.Println("\tvotedFor: ", rf.votedFor);
-	//////fmt.Println("\tcurrentTerm: ", rf.currentTerm);
+	////////fmt.Println(args.CandidateId, " requestvote called on raft id: ", rf.me);
+	////////fmt.Println("\tstate: ", rf.state);
+	////////fmt.Println("\tvotedFor: ", rf.votedFor);
+	////////fmt.Println("\tcurrentTerm: ", rf.currentTerm);
 
-	rf.mu.Lock()
-	rfState := rf.state;
+	rf.lock()
+	defer rf.unlock();
+	//rfState := rf.state;
 	rfTerm := rf.currentTerm;
 	rfVotedFor := rf.votedFor;
-	rf.mu.Unlock();
+
 
 	// Your code here (2A, 2B).
+	/*
 	if rfState == "leader" {
 		reply.Term = rfTerm;
 		reply.VoteGranted = false;
-		//fmt.Println("\t", rf.me, " already leader [reject]");
+		fmt.Println("\t", rf.me, " already leader and rejects", args.CandidateId," [reject]");
 		return;
-	}
+	}*/
 
 	if rfTerm > args.Term {
 		reply.Term = rfTerm;
 		reply.VoteGranted = false;
-		//fmt.Println("\t", rf.me, " term higher than candidate [reject]");
+		fmt.Println("\t", rf.me, " term higher than candidate ", args.CandidateId, " [reject]");
 		return;
 	}
 
 	if rfTerm == args.Term && rfVotedFor != -1 {
 		//&&rf.votedFor != args.CandidateId
-		reply.Term = rfTerm;
-		reply.VoteGranted = false;
+		if rfVotedFor != args.CandidateId { //reject if the person I voted for is not the candidate
+			reply.Term = rfTerm;
+			reply.VoteGranted = false;
 
-		//fmt.Println("\t", rf.me, " already voted for ", rf.votedFor ," [reject]");
-		return;
+			fmt.Println("\t", rf.me, " already voted for ", rf.votedFor ," and rejects ", args.CandidateId," [reject]");
+			return;
+		}
 	}
 
 	if rfTerm < args.Term { //self is not up to date, convert to follower if not already follower
-		//fmt.Println("\t", rf.me, " term out of date, convert to follower, previous: ", rf.state);
-		rf.mu.Lock();
+		////fmt.Println("\t", rf.me, " term out of date, convert to follower, previous: ", rf.state);
 		rf.state = "follower";
 		rf.currentTerm = args.Term;
-		rf.mu.Unlock();
 	}
 
-	rf.mu.Lock();
 	rfLastLogIndex := len(rf.log) - 1;
 	rfLastLogTerm := 0;
 	if rfLastLogIndex >= 0 {
 		rfLastLogTerm = rf.log[rfLastLogIndex].Term;
 	}
-	rf.mu.Unlock();
 
 	//make sure candidate has more up to date log, otherwise reject vote request
-	if args.LastLogTerm > rfLastLogTerm || args.LastLogTerm == rfLastLogTerm && args.LastLogIndex > rfLastLogIndex {
-		rf.mu.Lock();
+	if args.LastLogTerm < rfLastLogTerm || args.LastLogTerm == rfLastLogTerm && args.LastLogIndex < rfLastLogIndex {
+		reply.VoteGranted = false;
+		fmt.Println("\t", rf.me, " has more up to date log than candidate ", args.CandidateId ," [reject]\n\t\targs.LastLogTerm: ", args.LastLogTerm,"\n\t\trfLastLogTerm: ", rfLastLogTerm,"\n\t\targs.LastLogIndex: ", args.LastLogIndex,"\n\t\trfLastLogIndex: ", rfLastLogIndex,"\n\t\trf.log: ", rf.log);
+	} else {
 		rf.votedFor = args.CandidateId;
 		rf.state = "follower";
 		rf.currentTerm = args.Term;
 		rfTerm = rf.currentTerm;
-		rf.mu.Unlock();
 		reply.VoteGranted = true;
-	} else {
-		reply.VoteGranted = false;
+
+		fmt.Println("\t", rf.me, " voted for ", rf.votedFor, ". currentTerm: ", rf.currentTerm, "[accept]");
 	}
 	reply.Term = rfTerm;
-	//////fmt.Println("\t", rf.me, " votes for ", rf.votedFor, ". currentTerm: ", rf.currentTerm);
 	return;
 }
 
@@ -294,15 +307,15 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) bool {
 	ok := rf.peers[server].Call("Raft.RequestVote", args, reply);
 
-	//fmt.Println(rf.me, " sendRequestVote: called ", server);
-	//fmt.Println("\targs| term: ", args.Term, ", CandidateId: ", args.CandidateId);
-	//fmt.Println("\treply| term:  ", reply.Term, ", votedGranted: ", reply.VoteGranted);
+	////fmt.Println(rf.me, " sendRequestVote: called ", server);
+	////fmt.Println("\targs| term: ", args.Term, ", CandidateId: ", args.CandidateId);
+	////fmt.Println("\treply| term:  ", reply.Term, ", votedGranted: ", reply.VoteGranted);
 
 	if ok {
-		rf.mu.Lock();
+		rf.lock();
 		rfState := rf.state;
 		rfTerm := rf.currentTerm;
-		rf.mu.Unlock();
+		rf.unlock();
 
 		if rfState != "candidate" {
 			return ok;
@@ -311,22 +324,22 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 			return ok;
 		}
 		if reply.Term > rfTerm { //leader out of date, demoted to follower
-			rf.mu.Lock();
+			rf.lock();
 			rf.currentTerm = reply.Term
 			rf.state = "follower";
 			rf.votedFor = -1;
-			//////fmt.Println("\tleader out of date, demoted to follower");
-			rf.mu.Unlock();
+			////////fmt.Println("\tleader out of date, demoted to follower");
+			rf.unlock();
 		}
 		if reply.VoteGranted { //vote was received
-			rf.mu.Lock();
+			rf.lock();
 			rf.voteCount = rf.voteCount + 1;
-			//fmt.Println("\tvote granted, vote count now: ", rf.voteCount);
+			////fmt.Println("\tvote granted, vote count now: ", rf.voteCount);
 			if rf.state == "candidate" && rf.voteCount > len(rf.peers)/2 {
 				rf.electedChannel <- true
-				//fmt.Println("\telectedChannel true. ", rf.voteCount, " > ", len(rf.peers)/2);
+				////fmt.Println("\telectedChannel true. ", rf.voteCount, " > ", len(rf.peers)/2);
 			}
-			rf.mu.Unlock();
+			rf.unlock();
 		}
 	}
 
@@ -334,14 +347,14 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 }
 
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
-	rf.mu.Lock();
-	defer rf.mu.Unlock();
+	rf.lock();
+	defer rf.unlock();
 	rfTerm := rf.currentTerm;
 	//rfMe := rf.me;
 	//used for checking commitIndex
 	//rfCommitIndex := rf.commitIndex;
 	//rfLogLength := len(rf.log);
-	////fmt.Println("AppendEntries called on ", rf.me);
+	//////fmt.Println("AppendEntries called on ", rf.me);
 
 	reply.Term = rfTerm;
 	reply.Index = -1;
@@ -349,16 +362,16 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	//AppendEntries RPC Rule 1
 	if rfTerm != args.Term {
 		if rfTerm > args.Term {
-			//fmt.Println(rfMe, " has higher term (", rfTerm ,") than args/leader (", args.Term, ")");
-			//fmt.Println("\trejecting offer from ", args.LeaderId);
+			////fmt.Println(rfMe, " has higher term (", rfTerm ,") than args/leader (", args.Term, ")");
+			////fmt.Println("\trejecting offer from ", args.LeaderId);
 			//tempTerm, tempIsLeader := rf.GetState();
-			//fmt.Println("\tgetState for ", rf.me, ": term: ", tempTerm, ", isLeader: ", tempIsLeader);
-			//fmt.Println("\tstate: ", rf.state);
+			////fmt.Println("\tgetState for ", rf.me, ": term: ", tempTerm, ", isLeader: ", tempIsLeader);
+			////fmt.Println("\tstate: ", rf.state);
 			reply.Success = false;
 			return;
 		} else { // leader has higher term, squash any potential candidates/leaders
-			////fmt.Println(rf.me, " has lower term (", rfTerm ,") than leader ", args.LeaderId,"'s args.Term (", args.Term, ")");
-			////fmt.Println("\tsquashing, updating rf.currentTerm");
+			//////fmt.Println(rf.me, " has lower term (", rfTerm ,") than leader ", args.LeaderId,"'s args.Term (", args.Term, ")");
+			//////fmt.Println("\tsquashing, updating rf.currentTerm");
 			rf.currentTerm = args.Term;
 			rf.state = "follower";
 			rf.votedFor = -1;
@@ -367,7 +380,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	rf.heartbeatChannel <- true; //receive heartbeat if valid leader
 
-	////fmt.Println("\t", rf.me, " rf.commitIndex: ", rf.commitIndex, ", args.LeaderCommit: ", args.LeaderCommit);
+	//////fmt.Println("\t", rf.me, " rf.commitIndex: ", rf.commitIndex, ", args.LeaderCommit: ", args.LeaderCommit);
 
 	rfPrevLogIndex := len(rf.log)-1;
 	/*
@@ -377,20 +390,20 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	}*/
 
 	if (rf.me == 1) {
-		fmt.Println("1111 APPEND ENTRIES: args.PrevLogIndex: ", args.PrevLogIndex, " vs rfPrevLogIndex:", len(rf.log)-1);
+		//fmt.Println("1111 APPEND ENTRIES: args.PrevLogIndex: ", args.PrevLogIndex, " vs rfPrevLogIndex:", len(rf.log)-1);
 	}
 
 	//AppendEntries RPC Rule 2
 	if args.PrevLogIndex >= 0 {
 		if (args.PrevLogIndex > rfPrevLogIndex || rf.log[args.PrevLogIndex].Term != args.PrevLogTerm) {
 			//if len(args.Entries) > 0 {
-				//fmt.Println(rfMe, " rejected AppendEntriesArgs: ", args);
-				//fmt.Println("\trfPrevLogIndex: ", rfPrevLogIndex);
-				//fmt.Println("\targs.PrevLogIndex: ", args.PrevLogIndex);
-				//fmt.Println("\t", rfPrevLogIndex >= args.PrevLogIndex)
-				//fmt.Println("\trfPrevLogTerm: ", rfPrevLogTerm);
-				//fmt.Println("\targs.PrevLogTerm: ", args.PrevLogTerm);
-				//fmt.Println("\t", rfPrevLogTerm == args.PrevLogTerm);
+				////fmt.Println(rfMe, " rejected AppendEntriesArgs: ", args);
+				////fmt.Println("\trfPrevLogIndex: ", rfPrevLogIndex);
+				////fmt.Println("\targs.PrevLogIndex: ", args.PrevLogIndex);
+				////fmt.Println("\t", rfPrevLogIndex >= args.PrevLogIndex)
+				////fmt.Println("\trfPrevLogTerm: ", rfPrevLogTerm);
+				////fmt.Println("\targs.PrevLogTerm: ", args.PrevLogTerm);
+				////fmt.Println("\t", rfPrevLogTerm == args.PrevLogTerm);
 			//}
 
 			//firstIndexInTerm := -1;
@@ -410,9 +423,9 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			}*/
 			
 			if (rf.me == 1) {
-				fmt.Println(rf.me, " rejected AppendEntriesArgs: ", args);
-				//fmt.Println("\tfirstIndexInTerm: ", firstIndexInTerm);
-				fmt.Println("\trf.log: ", rf.log);
+				//fmt.Println(rf.me, " rejected AppendEntriesArgs: ", args);
+				////fmt.Println("\tfirstIndexInTerm: ", firstIndexInTerm);
+				//fmt.Println("\trf.log: ", rf.log);
 			}
 
 			return;
@@ -422,65 +435,42 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	//AppendEntries RPC Rule 3	
 	
 	if (rf.me == 1) {
-		fmt.Println(rf.me, " accepted AppendEntriesArgs: ", args, "\n\t rf.log before: ", rf.log);
+		//fmt.Println(rf.me, " accepted AppendEntriesArgs: ", args, "\n\t rf.log before: ", rf.log);
 	}
-	//entryStartIndex := -1;
-	/*
-	for i := 0; i < len(args.Entries); i++ {
-		////fmt.Println("\tappending to log, entry: ", args.Entries[i]);
-		entry := args.Entries[i];
-		index := entry.Index;
-		
-		if index <= rfPrevLogIndex {
-			if rf.log[index].Term != entry.Term {
-				fmt.Println("[delete] ", rf.me, " found conflict term at index: ", index, " because rf.log[index] (", rf.log[index], ")'s term: ", rf.log[index].Term, " != entry.Term: ", entry.Term);
-				rf.log = rf.log[:index]; //delete stale/conflicting entries in rf.log
-				fmt.Println("[delete] log now: ", rf.log);
-				entryStartIndex = i; //set entry start index in args.Entries for appending to index
-				break;
-			}
-		} else {
-			break;
-		}
-	}*/
 
-	/*
-	fmt.Println("entryStartIndex: ", entryStartIndex);
-	fmt.Println("args.Entries: ", args.Entries);
-	fmt.Println("min(0, entryStartIndex): ", min(0, entryStartIndex));
-	fmt.Println("len(args.Entries): ", len(args.Entries));
-	*/
 	//AppendEntries RPC Rule 4
+	//fmt.Println(rf.me, " rf.log previously: ", rf.log);
+	//fmt.Println(rf.me, " endInterval args.PrevLogIndex+1 is ", args.PrevLogIndex+1);
 	rf.log = rf.log[:args.PrevLogIndex+1];
+	//fmt.Println(rf.me, " rf.log truncated to: ", rf.log);
 
 	if (rf.me == 1) {
-		fmt.Println(rf.me, "rf.log truncated by index args.PrevLogIndex+1: ", args.PrevLogIndex+1, " now: ", rf.log);
+		//fmt.Println(rf.me, "rf.log truncated by index args.PrevLogIndex+1: ", args.PrevLogIndex+1, " now: ", rf.log);
 	}
 
 	for i := 0; i < len(args.Entries); i++ {
 		rf.log = append(rf.log, args.Entries[i]);
 	}
-	if (rf.me == 1) {
-		fmt.Println(rf.me, "appended entries: ", args.Entries, ". rf.log now: ", rf.log);
-	}
+
+	//fmt.Println(rf.me, "appended from ", args.LeaderId, ". entries: ", args.Entries, ". rf.log now: ", rf.log);
 
 	if (rf.me == 1) {
-		fmt.Println("1111 rf.commitIndex: ", rf.commitIndex);
-		fmt.Println("1111 args.LeaderCommit: ", args.LeaderCommit);
+		//fmt.Println("1111 rf.commitIndex: ", rf.commitIndex);
+		//fmt.Println("1111 args.LeaderCommit: ", args.LeaderCommit);
 		if rf.commitIndex != args.LeaderCommit {
-			fmt.Println("1111 1111 changing commitIndex");
+			//fmt.Println("1111 1111 changing commitIndex");
 		}
 	}
 
 	//AppendEntries RPC Rule 5
 	if rf.commitIndex < args.LeaderCommit {
-		////fmt.Println("\t", rf.me, "'s commitIndex (", rf.commitIndex, ") < args.LeaderCommit: ", args.LeaderCommit);
-		////fmt.Println("\tlen(rf.log): ", len(rf.log));
-		////fmt.Println("\trf.log: ", rf.log);
-		//fmt.Println(rf.me, " has outdated commitIndex (", rf.commitIndex, ") vs leader's ", args.LeaderCommit, " it's now: ", min(args.LeaderCommit, len(rf.log)-1));
+		//////fmt.Println("\t", rf.me, "'s commitIndex (", rf.commitIndex, ") < args.LeaderCommit: ", args.LeaderCommit);
+		//////fmt.Println("\tlen(rf.log): ", len(rf.log));
+		//////fmt.Println("\trf.log: ", rf.log);
+		////fmt.Println(rf.me, " has outdated commitIndex (", rf.commitIndex, ") vs leader's ", args.LeaderCommit, " it's now: ", min(args.LeaderCommit, len(rf.log)-1));
 		rf.commitIndex = min(args.LeaderCommit, len(rf.log)-1);
 		if (rf.me == 1) {
-			fmt.Println("1 has new commitIndex: ", rf.commitIndex, "\n\twith c: rf.log: ", rf.log);
+			//fmt.Println("1 has new commitIndex: ", rf.commitIndex, "\n\twith c: rf.log: ", rf.log);
 		}
 	}
 
@@ -493,39 +483,36 @@ func (rf *Raft) transmitAppendEntries(peerIndex int, args *AppendEntriesArgs) Ap
 	var finalReply AppendEntriesReply;
 
 	if (peerIndex == 1) {
-		fmt.Println(rf.me, " transmitting to ", peerIndex, "\n\targs: ", args);
+		//fmt.Println(rf.me, " transmitting to ", peerIndex, "\n\targs: ", args);
 	}
 
 	successfulCall := rf.peers[peerIndex].Call("Raft.AppendEntries", args, &finalReply);
 
-	rf.mu.Lock();
-	defer rf.mu.Unlock();
+	rf.lock();
+	defer rf.unlock();
 	rfCurrentTerm := rf.currentTerm;
 	rfLog := make([] LogEntry, len(rf.log)); //OPTIMIZE
 	copy(rfLog, rf.log); //OPTIMIZE, ONLY NEED THIS IF APPEND ENTRY GETS REJECTED
 
-
+	//TODO, make sure snapshotted term = current term (make sure leader didn't become leader again later with a later term)
 	if rf.state == "leader" && successfulCall && len(args.Entries) > 0 { //only if not a heartbeat message
-		//fmt.Println(rf.me, " successfully called append entries on ", peerIndex);
+		////fmt.Println(rf.me, " successfully called append entries on ", peerIndex);
 		if rfCurrentTerm < finalReply.Term { //leader is outdated, revert to follower
-			//fmt.Println("\tbut outdated");
+			//fmt.Println("\tbut ", rf.me," outdated. reverted to follower");
 			rf.currentTerm = finalReply.Term;
 			rf.state = "follower";
 			rf.votedFor = -1;
-			//fmt.Println(rf.me, " reverted to state: ", rf.state);
+			////fmt.Println(rf.me, " reverted to state: ", rf.state);
 		} else {
 			if finalReply.Success {
-				if (peerIndex == 1) {
-					fmt.Println(peerIndex, "accepted from", rf.me);
-				}
 				updatedIndex := args.Entries[len(args.Entries)-1].Index;
-				////fmt.Println("\t", rf.me, " successfully replicated entry to ", peerIndex, ".\n\trf.nextIndex[peerIndex] previously: ", rf.nextIndex[peerIndex], ". now: ", updatedIndex);
+				//////fmt.Println("\t", rf.me, " successfully replicated entry to ", peerIndex, ".\n\trf.nextIndex[peerIndex] previously: ", rf.nextIndex[peerIndex], ". now: ", updatedIndex);
 				rf.matchIndex[peerIndex] = updatedIndex;
 				rf.nextIndex[peerIndex] = len(args.Entries) + args.PrevLogIndex + 1;
-				fmt.Println("ACCEPTED rf.nextIndex[peerIndex] changed to: ", rf.nextIndex[peerIndex], ", with len(args.Entries)=", len(args.Entries), " + args.PrevLogTerm +1:", (args.PrevLogIndex+1)," with rf.log.length: ", len(rf.log));
+				//fmt.Println("ACCEPTED rf.nextIndex[peerIndex] changed to: ", rf.nextIndex[peerIndex], ", with len(args.Entries)=", len(args.Entries), " + args.PrevLogTerm +1:", (args.PrevLogIndex+1)," with rf.log.length: ", len(rf.log));
 			} else { //rejected for some reason, retry with an older entry
 				if (peerIndex == 1) {
-					fmt.Println(peerIndex, " rejected from ", rf.me, "\n\targs: ", args, "\n\told rf.nextIndex[peerIndex]: ", rf.nextIndex[peerIndex]);
+					//fmt.Println(peerIndex, " rejected from ", rf.me, "\n\targs: ", args, "\n\told rf.nextIndex[peerIndex]: ", rf.nextIndex[peerIndex]);
 				}
 
 				/*
@@ -535,12 +522,9 @@ func (rf *Raft) transmitAppendEntries(peerIndex int, args *AppendEntriesArgs) Ap
 					rf.nextIndex[peerIndex] = rf.nextIndex[peerIndex] - 1;
 				}*/
 
-				if rf.nextIndex[peerIndex] == 0 {
-					fmt.Println("ERROR SHOULD NOT GET HERE NEXTINDEX APPROACHING -1");
-				}
 				rf.nextIndex[peerIndex] = rf.nextIndex[peerIndex] - 1;
 
-				fmt.Println("REJECTED rf.nextIndex[peerIndex] changed to: ", rf.nextIndex[peerIndex], ", with rf.log.length: ", len(rf.log));
+				//fmt.Println("REJECTED rf.nextIndex[peerIndex] changed to: ", rf.nextIndex[peerIndex], ", with rf.log.length: ", len(rf.log));
 
 				//todo, continously retry with older entry maybe here too
 
@@ -550,7 +534,7 @@ func (rf *Raft) transmitAppendEntries(peerIndex int, args *AppendEntriesArgs) Ap
 				newArgs.LeaderId = args.LeaderId;
 				rf.nextIndex[peerIndex] = rf.nextIndex[peerIndex] - 1;
 				if rf.nextIndex[peerIndex] < 0 {//FAIL FAST DEBUG
-					//fmt.Println("\tfollower ", peerIndex, " rejected appendentry. decrementing rf.nextIndex[peerIndex] to ", rf.nextIndex[peerIndex]);
+					////fmt.Println("\tfollower ", peerIndex, " rejected appendentry. decrementing rf.nextIndex[peerIndex] to ", rf.nextIndex[peerIndex]);
 				}
 				if rf.nextIndex[peerIndex] >= 0 {
 					newArgs.Entries = rf.log[rf.nextIndex[peerIndex]:];
@@ -562,16 +546,16 @@ func (rf *Raft) transmitAppendEntries(peerIndex int, args *AppendEntriesArgs) Ap
 					newArgs.PrevLogTerm = 0;
 				}
 				newArgs.LeaderCommit = args.LeaderCommit;
-				//fmt.Println("\tso attempting to retry with new args: ", newArgs);
+				////fmt.Println("\tso attempting to retry with new args: ", newArgs);
 				finalReply = rf.transmitAppendEntries(peerIndex, &newArgs);
 				*/
 			}
 		}
 
 	} else { //debug, due to follower timeout/failure??
-		////fmt.Println("FATAL ERROR 2");
-		////fmt.Println("successfulCall: ", successfulCall, ". len(args.Entries): ", len(args.Entries));
-		//fmt.Println(rf.me, " couldn't contact ", peerIndex, ". resetting rf.nextIndex to 0");
+		//////fmt.Println("FATAL ERROR 2");
+		//////fmt.Println("successfulCall: ", successfulCall, ". len(args.Entries): ", len(args.Entries));
+		////fmt.Println(rf.me, " couldn't contact ", peerIndex, ". resetting rf.nextIndex to 0");
 		//rf.nextIndex[peerIndex] = 0; //resend entire log from beginning if follower comes back
 	}
 	return finalReply;
@@ -591,7 +575,8 @@ func (rf *Raft) transmitAppendEntries(peerIndex int, args *AppendEntriesArgs) Ap
 // the leader.
 //
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
-	rf.mu.Lock();
+	rf.lock();
+	defer rf.unlock();
 	//index := rf.commitIndex+1; //what was my reason for using rf.commitIndex+1 again?
 
 
@@ -601,58 +586,60 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	}
 
 	term := rf.currentTerm;
-	rf.mu.Unlock();
 	isLeader := true;
 
 	// Your code here (2B).
-	term, isLeader = rf.GetState();
+	term = rf.currentTerm;
+	isLeader = rf.state == "leader";
 	if isLeader {
-		//fmt.Println(rf.me, "'s start() called on command: ", command);
+		fmt.Println(rf.me, "'s start() called on command: ", command);
 		//add LogEntry to own leader log
-		rf.mu.Lock();
 		var entry LogEntry;
 		entry.Term = term;
 		entry.Command = command;
 		entry.Index = index;
 		rf.nextIndex[rf.me] = index;
-		////fmt.Println(rf.me, "'s rf.log before: ", rf.log);
+		//////fmt.Println(rf.me, "'s rf.log before: ", rf.log);
 		rf.log = append(rf.log, entry);
-		////fmt.Println(rf.me, "'s rf.log after: ", rf.log);
-		rf.mu.Unlock();
+		//////fmt.Println(rf.me, "'s rf.log after: ", rf.log);
 
 		//transmit LogEntry to other rafts
-		repCountingChannel := make(chan bool, 100);
+		//repCountingChannel := make(chan bool, 100);
 		for i := 0; i < len(rf.peers); i++ {
 			if i != rf.me {
-				go func (peerIndex int, countingCh chan bool) {
-					//fmt.Println(rf.me, "'s REPLICATE called on peerIndex: ", peerIndex);
-					rf.mu.Lock();
+				go func (peerIndex int/*, countingCh chan bool*/) {
+					////fmt.Println(rf.me, "'s REPLICATE called on peerIndex: ", peerIndex);
 					var args AppendEntriesArgs;
 					args.Term = rf.currentTerm;
 					args.LeaderId = rf.me;
-					args.PrevLogIndex = len(rf.log)-1-1; //we subtract 1 more because we already appended the new command
-					////fmt.Println("\t", rf.me, "'s args.PrevLogIndex: ", args.PrevLogIndex, " for ", peerIndex);
+					//fmt.Println("rf.nextIndex: ", rf.nextIndex);
+					//fmt.Println("peerIndex: ", peerIndex);
+					args.PrevLogIndex = rf.nextIndex[peerIndex] - 1; //we subtract 1 more because we already appended the new command
+					//fmt.Println("START", rf.me, "'s args.PrevLogIndex: ", args.PrevLogIndex, " for ", peerIndex);
 					args.PrevLogTerm = 0;
 					if args.PrevLogIndex >= 0 {
 						args.PrevLogTerm = rf.log[args.PrevLogIndex].Term;
+					} else {
+						args.PrevLogTerm = 0;
 					}
 					if rf.nextIndex[peerIndex] >= 0 {
 						args.Entries = rf.log[rf.nextIndex[peerIndex]:];
+						//fmt.Println("START", rf.me, "for", peerIndex, ". rf.nextIndex[peerIndex]: ", rf.nextIndex[peerIndex]);
+						//fmt.Println("START", rf.me, "for", peerIndex, ". rf.log: ", rf.log);
 					}
-					////fmt.Println("\t", rf.me, "'s args.Entries: ", args.Entries, " for ", peerIndex);
+					//////fmt.Println("\t", rf.me, "'s args.Entries: ", args.Entries, " for ", peerIndex);
 					args.LeaderCommit = rf.commitIndex;
 
 					if (peerIndex == 1) {
-						fmt.Println("START", rf.me, " about to transmit entries: ", args.Entries, " to ", peerIndex);
-						fmt.Println("\tbecause rf.nextIndex[peerIndex]: ", rf.nextIndex[peerIndex]);
+						//fmt.Println("START", rf.me, " about to transmit entries: ", args.Entries, " to ", peerIndex);
+						//fmt.Println("\tbecause rf.nextIndex[peerIndex]: ", rf.nextIndex[peerIndex]);
 					}
-					rf.mu.Unlock();
 
 					reply := rf.transmitAppendEntries(peerIndex, &args);
 					if reply.Success {
 						//increase count of successful replication
-						countingCh <- true;
-						//fmt.Println("\tadding replicateCount for ", rfMe, " thanks to ", peerIndex);
+						//countingCh <- true;
+						////fmt.Println("\tadding replicateCount for ", rfMe, " thanks to ", peerIndex);
 					} else {
 						//if due to outdated leader, then quit and return
 						//we don't need to revert to follower here
@@ -660,42 +647,44 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 						//isLeader = false;
 						return;
 					}
-				}(i, repCountingChannel);
+				}(i/*, repCountingChannel*/);
 			}
 		}
+
+		/*
 		go func (countingCh chan bool) {
 			tally := 0;
 			//keeps tally of number of successful replications for this command
 			//if this is the majority of peers, then update state machine
 			for {
-				rf.mu.Lock();
+				rf.lock();
 				//quorum := int(math.Ceil(float64(len(rf.peers))/float64(2))); //quorum can change as followers d/c
 				quorum := len(rf.peers)/2;
-				rf.mu.Unlock();
-				//fmt.Println(rf.me, " has quorum calculated as: ", quorum);
-				//fmt.Println("peers length: ", len(rf.peers));
+				rf.unlock();
+				////fmt.Println(rf.me, " has quorum calculated as: ", quorum);
+				////fmt.Println("peers length: ", len(rf.peers));
 				select {
 				case <- countingCh:
 					tally = tally + 1;
-					//fmt.Println("current tally: ", tally);
+					////fmt.Println("current tally: ", tally);
 					if tally >= quorum {
-						//fmt.Println("COUNTING replicateCount for ", rfMe, ". now: ", tally, ". quorum: ", quorum);
+						////fmt.Println("COUNTING replicateCount for ", rfMe, ". now: ", tally, ". quorum: ", quorum);
 						//update state machine
-						rf.mu.Lock();
-						////fmt.Println("\tupdating state machine for ", rfMe); //debug
+						rf.lock();
+						//////fmt.Println("\tupdating state machine for ", rfMe); //debug
 						rf.commitIndex = rf.commitIndex + 1; //TODO should I do this before or after rf.commitChannel?
-						////fmt.Println("\t", rfMe, ": rf.commitIndex now: ", rf.commitIndex); //debug
-						rf.mu.Unlock();
+						fmt.Println("\t", rfMe, ": rf.commitIndex now: ", rf.commitIndex); //debug
+						rf.unlock();
 						//rf.commitChannel <- true; //inform our commit channel we have entries to commit
 						return; //we achieved quorum, stop counting
 					}
 				}
 			}
-		}(repCountingChannel);
+		}(repCountingChannel);*/
 	}
 
 	index = index + 1; //needs to be 1-indexed apparently
-	////fmt.Println(rf.me, " returning index: ", index, ", term: ", term, ", isLeader: ", isLeader);
+	//////fmt.Println(rf.me, " returning index: ", index, ", term: ", term, ", isLeader: ", isLeader);
 	return index, term, isLeader;
 }
 
@@ -712,69 +701,85 @@ func (rf *Raft) Kill() {
 //leader heartbeat receiver function
 func stateChecker(rf *Raft) {
 	timeToLive := time.Millisecond * time.Duration(rf.timeoutTime);
+	//lastTimeChecked := time.Now();
+
+	fmt.Println(rf.me, " time to live: ", timeToLive);
+
 	heartbeatInterval := 100 * time.Millisecond;
 
 	for {
-		rf.mu.Lock();
+		rf.lock();
 		curState := rf.state;
-		rf.mu.Unlock();
+		rf.unlock();
 		if curState == "follower" {
+
 			select {
 			case <- rf.heartbeatChannel:
-			case <- time.After(timeToLive):
-				//fmt.Println(rf.me, " no heartbeat, became candidate");
-				rf.mu.Lock();
+				//fmt.Println("there's a heartbeat");
+			case <- time.After(timeToLive)://time.Now().After(lastTimeChecked.Add(timeToLive)):
+				//lastTimeChecked = time.Now();
+				fmt.Println(rf.me, " no heartbeat, became candidate");
+				rf.lock();
 				rf.state = "candidate"; //no heartbeat, become candidate
-				rf.mu.Unlock();
+				rf.unlock();
 			}
 		} else if curState == "leader" {
 				//send heartbeat to everyone else
 				for i := 0; i < len(rf.peers); i++ {
 					if i != rf.me {
-						rf.mu.Lock();
+						rf.lock();
 						var appendEntriesArgs AppendEntriesArgs;
 						appendEntriesArgs.Term = rf.currentTerm;
 						appendEntriesArgs.LeaderId = rf.me;
 						appendEntriesArgs.PrevLogIndex = rf.nextIndex[i] - 1; //TODO CHECK THIS
 							//previously len(log) - 1;
 						if appendEntriesArgs.PrevLogIndex >= 0 {
+							//fmt.Println("HEARTBEAT PREPARE ARGS.", rf.me, " appendEntriesArgs.PrevLogIndex: ", appendEntriesArgs.PrevLogIndex, " because rf.nextIndex[",i,"] is: ", rf.nextIndex[i], ". log: ", rf.log);
 							appendEntriesArgs.PrevLogTerm = rf.log[appendEntriesArgs.PrevLogIndex].Term;
 						}
 						if rf.nextIndex[i] >= 0 {
 							appendEntriesArgs.Entries = rf.log[rf.nextIndex[i]:];
 						}
 						appendEntriesArgs.LeaderCommit = rf.commitIndex;
-						rf.mu.Unlock();
+						rf.unlock();
 
-						if i == 1 {
-							fmt.Println(rf.me, " sending heartbeat to 1, entries: ", appendEntriesArgs.Entries, ",\n\trf.log: ", rf.log, ",\n\trf.nextIndex[1]: ", rf.nextIndex[i]);
-						}
+						
+
+						//fmt.Println(rf.me, " sending heartbeat to ", i, ", entries: ", appendEntriesArgs.Entries, ",\n\trf.log: ", rf.log, ",\n\trf.nextIndex[1]: ", rf.nextIndex[i]);
+						
 
 						//send append entries
 						go func(peerIndex int, appendEntriesArgs AppendEntriesArgs) {
 							var appendEntriesReply AppendEntriesReply;
 							ok := rf.peers[peerIndex].Call("Raft.AppendEntries", &appendEntriesArgs, &appendEntriesReply);
-							rf.mu.Lock();
+							rf.lock();
 							rfTerm := rf.currentTerm;
-							rf.mu.Unlock();
+							rf.unlock();
 							if ok {
-								if !appendEntriesReply.Success {
+								if appendEntriesReply.Success {
+									if len(appendEntriesArgs.Entries) > 0 {
+										updatedIndex := appendEntriesArgs.Entries[len(appendEntriesArgs.Entries)-1].Index;
+										fmt.Println("\t", rf.me, " successfully replicated entry to ", peerIndex, ".\n\trf.nextIndex[peerIndex] previously: ", rf.nextIndex[peerIndex], ". now: ", updatedIndex);
+										rf.matchIndex[peerIndex] = updatedIndex;
+										rf.nextIndex[peerIndex] = len(appendEntriesArgs.Entries) + appendEntriesArgs.PrevLogIndex + 1;
+									}
+								} else {
 									if appendEntriesReply.Term > rfTerm { //leader is not up to date, demote to follower
-										rf.mu.Lock();
+										rf.lock();
 										rf.currentTerm = appendEntriesReply.Term;
 										rf.state = "follower";
 										rf.votedFor = -1;
-										//fmt.Println(rf.me, "'s term: ", rfTerm, " is < appendEntriesReply.Term: ", appendEntriesReply.Term, " so demoted back to follower");
-										rf.mu.Unlock();
+										////fmt.Println(rf.me, "'s term: ", rfTerm, " is < appendEntriesReply.Term: ", appendEntriesReply.Term, " so demoted back to follower");
+										rf.unlock();
 									} else { //TODO CHECKT THIS decrease nextIndex??
 										if (peerIndex == 1) {
-											fmt.Println("need to decrease index cuz heartbeat failed on rf.nextIndex[1]: ", rf.nextIndex[peerIndex]);
+											//fmt.Println("need to decrease index cuz heartbeat failed on rf.nextIndex[1]: ", rf.nextIndex[peerIndex]);
 										}
 										stillFailed := true;
 										for stillFailed {//immediately retry
-											rf.mu.Lock();
+											rf.lock();
 											rf.nextIndex[peerIndex] = rf.nextIndex[peerIndex] - 1;
-											fmt.Println("FAILED rf.nextIndex[peerIndex] changed to: ", rf.nextIndex[peerIndex], ", with rf.log.length: ", len(rf.log));
+											//fmt.Println("FAILED rf.nextIndex[peerIndex] changed to: ", rf.nextIndex[peerIndex], ", with rf.log.length: ", len(rf.log));
 											var args AppendEntriesArgs;
 											args.Term = rf.currentTerm;
 											args.LeaderId = rf.me;
@@ -784,30 +789,33 @@ func stateChecker(rf *Raft) {
 											}
 											if rf.nextIndex[peerIndex] >= 0 { //we send entire log if nextIndex = -1?
 												args.Entries = append(args.Entries, rf.log[rf.nextIndex[peerIndex]:len(rf.log)]...);
-												fmt.Println("IMMEDIATE RETRY ENTRIES - rf.nextIndex[1]: ", rf.nextIndex[peerIndex], " on rf.log: ", rf.log);
+												//fmt.Println("IMMEDIATE RETRY ENTRIES - rf.nextIndex[1]: ", rf.nextIndex[peerIndex], " on rf.log: ", rf.log);
 											} else {
 												args.Entries = append(args.Entries, rf.log[:]...);
 											}
 											args.LeaderCommit = rf.commitIndex;
 
 											if (peerIndex == 1) {
-												fmt.Println("immediately retrying with rf.nextIndex[1]: ", rf.nextIndex[peerIndex], "new args: ", args);
+												//fmt.Println("immediately retrying with rf.nextIndex[1]: ", rf.nextIndex[peerIndex], "new args: ", args);
 											}
 
 											var reply AppendEntriesReply;
-											rf.mu.Unlock();
+											rf.unlock();
 											ok := rf.peers[peerIndex].Call("Raft.AppendEntries", &args, &reply);
-											rf.mu.Lock();
+											rf.lock();
 											//TODO, also check if leader not up to date
 											//better, recurve above code, efficient
 
 											if ok {
 												stillFailed = !reply.Success;
 												if stillFailed == false {
-													fmt.Println("IMMEDIATE RETRY: finally succeeded appending entry");
+													//fmt.Println("IMMEDIATE RETRY: finally succeeded appending entry");
+													updatedIndex := args.Entries[len(args.Entries)-1].Index;
+													//////fmt.Println("\t", rf.me, " successfully replicated entry to ", peerIndex, ".\n\trf.nextIndex[peerIndex] previously: ", rf.nextIndex[peerIndex], ". now: ", updatedIndex);
+													rf.matchIndex[peerIndex] = updatedIndex;
 													rf.nextIndex[peerIndex] = len(args.Entries) + args.PrevLogIndex + 1;
 												}
-												rf.mu.Unlock();
+												rf.unlock();
 											} else {
 
 											}
@@ -820,18 +828,18 @@ func stateChecker(rf *Raft) {
 				}
 				time.Sleep(heartbeatInterval);
 		} else { //candidate
-			rf.mu.Lock();
-			//fmt.Println(rf.me, " candidate mode");
-			//fmt.Println(rf.me, "rf.currentTerm prev: ", rf.currentTerm);
+			rf.lock();
+			fmt.Println(rf.me, " candidate mode");
+			////fmt.Println(rf.me, "rf.currentTerm prev: ", rf.currentTerm);
 			rf.currentTerm = rf.currentTerm + 1;
-			//fmt.Println(rf.me, "rf.currentTerm after: ", rf.currentTerm);
+			////fmt.Println(rf.me, "rf.currentTerm after: ", rf.currentTerm);
 			rf.votedFor = rf.me;
 			rf.voteCount = 1;
-			rf.mu.Unlock();
+			rf.unlock();
 
 			//send requestvotes to everyone else
 			var requestVoteArgs RequestVoteArgs
-			rf.mu.Lock();
+			rf.lock();
 			requestVoteArgs.Term = rf.currentTerm;
 			requestVoteArgs.CandidateId = rf.me;
 			requestVoteArgs.LastLogIndex = len(rf.log)-1;
@@ -840,7 +848,7 @@ func stateChecker(rf *Raft) {
 				requestVoteArgs.LastLogTerm = rf.log[requestVoteArgs.LastLogIndex].Index;
 			}
 			rfMe := rf.me;
-			rf.mu.Unlock();
+			rf.unlock();
 
 			for i := range rf.peers {
 				if i != rfMe {
@@ -848,7 +856,7 @@ func stateChecker(rf *Raft) {
 					//send requestVotes in parallel;
 					go func(peerIndex int) {
 						var requestVoteReply RequestVoteReply;
-						//fmt.Println(requestVoteArgs.CandidateId, " sending request vote to ", peerIndex);
+						////fmt.Println(requestVoteArgs.CandidateId, " sending request vote to ", peerIndex);
 						rf.sendRequestVote(peerIndex, &requestVoteArgs, &requestVoteReply);
 					}(i);
 					//}
@@ -857,19 +865,19 @@ func stateChecker(rf *Raft) {
 
 			select {
 				case <-time.After(timeToLive):
-					rf.mu.Lock();
+					rf.lock();
 					if rf.state != "leader" {
 						rf.state = "follower";
-						//////fmt.Println(rf.me, "election timeout, went back to follower");
+						fmt.Println(rf.me, "election timeout, went back to follower");
 					}
-					rf.mu.Unlock();
+					rf.unlock();
 				case <-rf.heartbeatChannel:
-					rf.mu.Lock();
+					rf.lock();
 					rf.state = "follower";
-					//////fmt.Println(rf.me, " found heartbeat. went back to follower");
-					rf.mu.Unlock();
+					fmt.Println(rf.me, " found heartbeat. went back to follower");
+					rf.unlock();
 				case <-rf.electedChannel:
-					rf.mu.Lock()
+					rf.lock()
 					rf.state = "leader";
 					fmt.Println(rf.me, " BECAME LEADER on TERM: ", rf.currentTerm);
 
@@ -880,7 +888,7 @@ func stateChecker(rf *Raft) {
 						rf.nextIndex[i] = len(rf.log);
 						rf.matchIndex[i] = -1;
 					}
-					rf.mu.Unlock();
+					rf.unlock();
 			}
 		}
 	}
@@ -889,29 +897,29 @@ func stateChecker(rf *Raft) {
 func applyChannelChecker(rf *Raft, applyCh chan ApplyMsg) {
 	for {
 		time.Sleep(10 * time.Millisecond);
-		rf.mu.Lock();
+		rf.lock();
 		rfCommitIndex := rf.commitIndex;
 		prevLastApplied  := rf.lastApplied;
-		rf.mu.Unlock();
+		rf.unlock();
 		if rfCommitIndex > prevLastApplied {
-			////fmt.Println("raft ", rf.me, " has commitIndex ", rf.commitIndex, " > lastApplied: ", rf.lastApplied);
-			rf.mu.Lock();
+			//////fmt.Println("raft ", rf.me, " has commitIndex ", rf.commitIndex, " > lastApplied: ", rf.lastApplied);
+			rf.lock();
 
 			rf.lastApplied = rf.lastApplied + 1;
 			prevLastApplied = rf.lastApplied;
 
 			if (rf.me == 1) {
-				fmt.Println("\tapplying message for ", rf.me);
+				//fmt.Println("\tapplying message for ", rf.me);
 
-				fmt.Println("\tprevLastApplied: ", prevLastApplied);
-				fmt.Println("\t", rf.me, " has rfCommitIndex: ", rf.commitIndex);
-				fmt.Println("\t", rf.me, " rf.lastApplied now: ", rf.lastApplied);
-				fmt.Println("\trf.log: ", rf.log);
+				//fmt.Println("\tprevLastApplied: ", prevLastApplied);
+				//fmt.Println("\t", rf.me, " has rfCommitIndex: ", rf.commitIndex);
+				//fmt.Println("\t", rf.me, " rf.lastApplied now: ", rf.lastApplied);
+				//fmt.Println("\trf.log: ", rf.log);
 			}
 
 			applyCommand := rf.log[prevLastApplied].Command;
 
-			rf.mu.Unlock();
+			rf.unlock();
 
 			//time.Sleep(10 * time.Millisecond);
 
@@ -920,23 +928,23 @@ func applyChannelChecker(rf *Raft, applyCh chan ApplyMsg) {
 			message.Index = prevLastApplied + 1; //account for 1-indexing for clients
 			message.Command = applyCommand;
 			
-			fmt.Println(rf.me, " sending message contents: ", message);
-			
 			applyCh <- message;
+
+			fmt.Println("[APPLY CH]", rf.me, " sent message contents: ", message);
 
 
 			/*
 			for i := prevLastApplied+1; i <= rfCommitIndex; i++ {
-				////fmt.Println("\tfor index: ", i);
+				//////fmt.Println("\tfor index: ", i);
 				var message ApplyMsg;
 				message.Index = i + 1;
 				message.Command = rfLog[i].Command;
-				//fmt.Println("\t", rf.me, " sending message contents: ", message);
+				////fmt.Println("\t", rf.me, " sending message contents: ", message);
 				applyCh <- message;
 
-				rf.mu.Lock();
+				rf.lock();
 				rf.lastApplied = rf.lastApplied + 1;
-				rf.mu.Unlock();
+				rf.unlock();
 			}*/
 		}
 	}
@@ -983,12 +991,46 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	//rand.Seed(time.Now().Unix())
 	//maxTimeout := 500;
 	//minTimeout := 250;
-	maxTimeout := 500;
-	minTimeout := 250;
+	maxTimeout := 1000;
+	minTimeout := 500;
 	rf.timeoutTime = rand.Intn(maxTimeout - minTimeout) + minTimeout;//generate random election timeout time
 	
+
 	go stateChecker(rf);
 	go applyChannelChecker(rf, applyCh);
+
+	go func (rf *Raft) {
+		for {
+			time.Sleep(10 * time.Millisecond);
+			rf.lock();
+			if rf.state == "leader" {
+				//quorum := len(rf.peers)/2;
+				currentCommitIndex := rf.commitIndex;
+
+				//find majority matchindex and assign it to candidateindex
+				candidateIndex := currentCommitIndex;
+				candidateCount := 1;
+				for i := 0; i < len(rf.peers); i++ {
+					matchIndex := rf.matchIndex[i];
+					if matchIndex == candidateIndex {
+						candidateCount = candidateCount + 1;
+					} else {
+						candidateCount = candidateCount - 1;
+						if candidateCount == 0 {
+							candidateIndex = matchIndex;
+							candidateCount = 1;
+						}
+					}
+				}
+				//majority matchindex after this should be candidateIndex
+				if candidateIndex > rf.commitIndex {
+					rf.commitIndex = candidateIndex;
+				}
+			}
+
+			rf.unlock();
+		}
+	}(rf);
 
 	return rf;
 }
