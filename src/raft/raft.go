@@ -24,7 +24,7 @@ import (
 	"math/rand"
 	"bytes"
 	"encoding/gob"
-	"fmt"
+	//"fmt"
 )
 
 
@@ -335,7 +335,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	//rfCommitIndex := rf.commitIndex;
 	//rfLogLength := len(rf.log);
 	if (len(args.Entries) > 0) {
-		fmt.Println(args.LeaderId, " called AppendEntries on ", rf.me, "with args:\n\tterm: ", args.Term, "\n\tleaderid: ", args.LeaderId, "\n\tprevlogindex: ", args.PrevLogIndex, "\n\tprevlogterm: ", args.PrevLogTerm, "\n\tentries[0]: ", args.Entries[0],"\n\tentries[last]: ", args.Entries[len(args.Entries)-1]);
+		//fmt.Println(args.LeaderId, " called AppendEntries on ", rf.me, "with args:\n\tterm: ", args.Term, "\n\tleaderid: ", args.LeaderId, "\n\tprevlogindex: ", args.PrevLogIndex, "\n\tprevlogterm: ", args.PrevLogTerm, "\n\tentries[0]: ", args.Entries[0],"\n\tentries[last]: ", args.Entries[len(args.Entries)-1]);
 	}
 
 	reply.Term = rf.currentTerm;
@@ -344,8 +344,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	//AppendEntries RPC Rule 1
 	if rf.currentTerm != args.Term {
 		if rf.currentTerm > args.Term {
-			fmt.Println(rf.me, " has higher term (", rf.currentTerm ,") than args/leader (", args.Term, ") for candidate: ", args.LeaderId);
-			fmt.Println("\trejecting due to rule 1 ");
+			//5//fmt.Println(rf.me, " has higher term (", rf.currentTerm ,") than args/leader (", args.Term, ") for candidate: ", args.LeaderId);
+			//5//fmt.Println("\trejecting due to rule 1 ");
 			reply.Success = false;
 			return;
 		} else { // leader has higher term, squash any potential candidates/leaders
@@ -369,29 +369,43 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	}*/
 
 	if (len(rf.log) > 0) {
-		fmt.Println("appendentries()", rf.me, " has rf.log[:1]: ", rf.log[:1]);
+		//fmt.Println("appendentries()", rf.me, " has rf.log[:1]: ", rf.log[:1]);
 	} else {
-		fmt.Println("appendentries()", rf.me, " has empty rf.log");
+		//fmt.Println("appendentries()", rf.me, " has empty rf.log");
 	}
 
 	//AppendEntries RPC Rule 2
 	if args.PrevLogIndex >= 0 { //prevents trying to get prevlogindex of empty log
-		if (args.PrevLogIndex > len(rf.log)-1 || rf.log[args.PrevLogIndex].Term != args.PrevLogTerm) {
-				if args.PrevLogIndex >= 0 && args.PrevLogIndex < len(rf.log) {
-					fmt.Println(rf.me, " rejected ", args.LeaderId, "due to Rule 2. args:\n\tterm: ", args.Term, "\n\tleaderid: ", args.LeaderId, "\n\tprevlogindex: ", args.PrevLogIndex, "\n\tprevlogterm: ", args.PrevLogTerm, "\n\trfPrevLogIndex: ", len(rf.log)-1, ". rf.log[", args.PrevLogIndex, "].Term: ",  rf.log[args.PrevLogIndex].Term);
-				} else if args.PrevLogIndex >= len(rf.log) {
-					fmt.Println(rf.me, " rejected ", args.LeaderId, "due to Rule 2. args:\n\tterm: ", args.Term, "\n\tleaderid: ", args.LeaderId, "\n\tprevlogindex: ", args.PrevLogIndex, "\n\tprevlogterm: ", args.PrevLogTerm, "\n\trfPrevLogIndex: ", len(rf.log)-1, ". rf.log[", args.PrevLogIndex, "].Term: nonexistent");
-				} else {
-					fmt.Println(rf.me, " rejected ", args.LeaderId, "due to Rule 2. args:\n\tterm: ", args.Term, "\n\tleaderid: ", args.LeaderId, "\n\tprevlogindex: ", args.PrevLogIndex, "\n\tprevlogterm: ", args.PrevLogTerm, "\n\trfPrevLogIndex: ", len(rf.log)-1);
+		if (args.PrevLogIndex > len(rf.log) - 1 || rf.log[args.PrevLogIndex].Term != args.PrevLogTerm) {
+			if args.PrevLogIndex >= 0 && args.PrevLogIndex < len(rf.log) {
+				//5//fmt.Println(rf.me, " rejected ", args.LeaderId, "due to Rule 2. args:\n\tterm: ", args.Term, "\n\tleaderid: ", args.LeaderId, "\n\tprevlogindex: ", args.PrevLogIndex, "\n\tprevlogterm: ", args.PrevLogTerm, "\n\trfPrevLogIndex: ", len(rf.log)-1, ". rf.log[", args.PrevLogIndex, "].Term: ",  rf.log[args.PrevLogIndex].Term);
+			} else if args.PrevLogIndex >= len(rf.log) {
+				//5//fmt.Println(rf.me, " rejected ", args.LeaderId, "due to Rule 2. args:\n\tterm: ", args.Term, "\n\tleaderid: ", args.LeaderId, "\n\tprevlogindex: ", args.PrevLogIndex, "\n\tprevlogterm: ", args.PrevLogTerm, "\n\trfPrevLogIndex: ", len(rf.log)-1, ". rf.log[", args.PrevLogIndex, "].Term: nonexistent");
+			} else {
+				//5//fmt.Println(rf.me, " rejected ", args.LeaderId, "due to Rule 2. args:\n\tterm: ", args.Term, "\n\tleaderid: ", args.LeaderId, "\n\tprevlogindex: ", args.PrevLogIndex, "\n\tprevlogterm: ", args.PrevLogTerm, "\n\trfPrevLogIndex: ", len(rf.log)-1);
+			}
+			/*
+			//5//fmt.Println("\trfPrevLogTerm: ", rf.log[args.PrevLogIndex].Term);
+			//5//fmt.Println("\targs.PrevLogTerm: ", args.PrevLogTerm);
+			//5//fmt.Println("\t", rf.log[args.PrevLogIndex].Term == args.PrevLogTerm);
+			*/
+
+			if args.PrevLogIndex > len(rf.log) - 1 {
+				reply.Index = len(rf.log);
+			} else {
+				//find index of first entry that shares the same term as the conflicting entry
+				conflictTerm := rf.log[args.PrevLogIndex].Term;
+				firstEntryIndex := args.PrevLogIndex;
+				for i := rf.log[args.PrevLogIndex].Index; i >= 0; i-- {
+					if rf.log[i].Term != conflictTerm {
+						break;
+					}
+					firstEntryIndex = rf.log[i].Index;
 				}
-				/*
-				//5//fmt.Println("\trfPrevLogTerm: ", rf.log[args.PrevLogIndex].Term);
-				//5//fmt.Println("\targs.PrevLogTerm: ", args.PrevLogTerm);
-				//5//fmt.Println("\t", rf.log[args.PrevLogIndex].Term == args.PrevLogTerm);
-				*/
+				reply.Index = firstEntryIndex;
+			}
 
 			reply.Success = false;
-
 			return;
 		}
 	}
@@ -407,8 +421,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	//AppendEntries RPC Rule 4
 
 	if args.PrevLogIndex + 1 < 0 || args.PrevLogIndex + 1 > len(rf.log) {
-		fmt.Println("PANIC args.PrevLogIndex: ", args.PrevLogIndex);
-		fmt.Println("\trf.log: ", rf.log);
+		//5//fmt.Println("PANIC args.PrevLogIndex: ", args.PrevLogIndex);
+		//5//fmt.Println("\trf.log: ", rf.log);
 	}
 
 	rf.log = rf.log[:args.PrevLogIndex+1];
@@ -490,7 +504,7 @@ func (rf *Raft) sendAppendEntries(peerIndex int, args *AppendEntriesArgs) {
 			} else { //rejected for some reason, retry with an older entry
 				rf.unlock();
 				//if (peerIndex == 1) {
-				fmt.Println("Rejected for some reaosn. IMMEDIATE RETRY:", peerIndex, " rejected from ", rf.me, "\n\targs: ", args, "\n\told rf.nextIndex[peerIndex]: ", rf.nextIndex[peerIndex]);
+				//5//fmt.Println("Rejected for some reaosn. IMMEDIATE RETRY:", peerIndex, " rejected from ", rf.me, "\n\targs: ", args, "\n\told rf.nextIndex[peerIndex]: ", rf.nextIndex[peerIndex]);
 				//}
 
 				////5//fmt.Println("REJECTED rf.nextIndex[peerIndex] changed to: ", rf.nextIndex[peerIndex], ", with rf.log.length: ", len(rf.log));
@@ -500,7 +514,11 @@ func (rf *Raft) sendAppendEntries(peerIndex int, args *AppendEntriesArgs) {
 				stillFailed := true;
 				for stillFailed { //immediately retry
 					rf.lock();
-					rf.nextIndex[peerIndex] = rf.nextIndex[peerIndex] - 1;
+					if finalReply.Index != -1 {
+						rf.nextIndex[peerIndex] = finalReply.Index;
+					} else {
+						rf.nextIndex[peerIndex] = rf.nextIndex[peerIndex] - 1;
+					}
 
 					//5//fmt.Println(rf.me, "rf.nextIndex[", peerIndex, "] decremented to: ", rf.nextIndex[peerIndex]);
 
