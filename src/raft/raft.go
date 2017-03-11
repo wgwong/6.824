@@ -24,7 +24,7 @@ import (
 	"math/rand"
 	"bytes"
 	"encoding/gob"
-	//"fmt"
+	"fmt"
 )
 
 
@@ -335,7 +335,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	//rfCommitIndex := rf.commitIndex;
 	//rfLogLength := len(rf.log);
 	if (len(args.Entries) > 0) {
-		//5//fmt.Println(args.LeaderId, " called AppendEntries on ", rf.me, "with args: ", args, "\n\trf.log: ", rf.log);
+		fmt.Println(args.LeaderId, " called AppendEntries on ", rf.me, "with args:\n\tterm: ", args.Term, "\n\tleaderid: ", args.LeaderId, "\n\tprevlogindex: ", args.PrevLogIndex, "\n\tprevlogterm: ", args.PrevLogTerm, "\n\tentries[0]: ", args.Entries[0],"\n\tentries[last]: ", args.Entries[len(args.Entries)-1]);
 	}
 
 	reply.Term = rf.currentTerm;
@@ -344,8 +344,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	//AppendEntries RPC Rule 1
 	if rf.currentTerm != args.Term {
 		if rf.currentTerm > args.Term {
-			//5//fmt.Println(rf.me, " has higher term (", rf.currentTerm ,") than args/leader (", args.Term, ") for candidate: ", args.LeaderId);
-			//5//fmt.Println("\trejecting due to rule 1 ");
+			fmt.Println(rf.me, " has higher term (", rf.currentTerm ,") than args/leader (", args.Term, ") for candidate: ", args.LeaderId);
+			fmt.Println("\trejecting due to rule 1 ");
 			reply.Success = false;
 			return;
 		} else { // leader has higher term, squash any potential candidates/leaders
@@ -368,16 +368,22 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rfPrevLogTerm = rf.log[rfPrevLogIndex].Term;
 	}*/
 
+	if (len(rf.log) > 0) {
+		fmt.Println("appendentries()", rf.me, " has rf.log[:1]: ", rf.log[:1]);
+	} else {
+		fmt.Println("appendentries()", rf.me, " has empty rf.log");
+	}
 
 	//AppendEntries RPC Rule 2
-	if args.PrevLogIndex >= 0 {
+	if args.PrevLogIndex >= 0 { //prevents trying to get prevlogindex of empty log
 		if (args.PrevLogIndex > len(rf.log)-1 || rf.log[args.PrevLogIndex].Term != args.PrevLogTerm) {
-			
-				//5//fmt.Println(rf.me, " rejected ", args.LeaderId, "due to Rule 2\n\tAppendEntriesArgs: ", args);
-				//5//fmt.Println("\trfPrevLogIndex: ", len(rf.log)-1);
-				//5//fmt.Println("\targs.PrevLogIndex: ", args.PrevLogIndex);
-				//5//fmt.Println("\trf.log: ", rf.log);
-				//5//fmt.Println("\t", len(rf.log)-1 >= args.PrevLogIndex)
+				if args.PrevLogIndex >= 0 && args.PrevLogIndex < len(rf.log) {
+					fmt.Println(rf.me, " rejected ", args.LeaderId, "due to Rule 2. args:\n\tterm: ", args.Term, "\n\tleaderid: ", args.LeaderId, "\n\tprevlogindex: ", args.PrevLogIndex, "\n\tprevlogterm: ", args.PrevLogTerm, "\n\trfPrevLogIndex: ", len(rf.log)-1, ". rf.log[", args.PrevLogIndex, "].Term: ",  rf.log[args.PrevLogIndex].Term);
+				} else if args.PrevLogIndex >= len(rf.log) {
+					fmt.Println(rf.me, " rejected ", args.LeaderId, "due to Rule 2. args:\n\tterm: ", args.Term, "\n\tleaderid: ", args.LeaderId, "\n\tprevlogindex: ", args.PrevLogIndex, "\n\tprevlogterm: ", args.PrevLogTerm, "\n\trfPrevLogIndex: ", len(rf.log)-1, ". rf.log[", args.PrevLogIndex, "].Term: nonexistent");
+				} else {
+					fmt.Println(rf.me, " rejected ", args.LeaderId, "due to Rule 2. args:\n\tterm: ", args.Term, "\n\tleaderid: ", args.LeaderId, "\n\tprevlogindex: ", args.PrevLogIndex, "\n\tprevlogterm: ", args.PrevLogTerm, "\n\trfPrevLogIndex: ", len(rf.log)-1);
+				}
 				/*
 				//5//fmt.Println("\trfPrevLogTerm: ", rf.log[args.PrevLogIndex].Term);
 				//5//fmt.Println("\targs.PrevLogTerm: ", args.PrevLogTerm);
@@ -401,8 +407,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	//AppendEntries RPC Rule 4
 
 	if args.PrevLogIndex + 1 < 0 || args.PrevLogIndex + 1 > len(rf.log) {
-		//5//fmt.Println("PANIC args.PrevLogIndex: ", args.PrevLogIndex);
-		//5//fmt.Println("\trf.log: ", rf.log);
+		fmt.Println("PANIC args.PrevLogIndex: ", args.PrevLogIndex);
+		fmt.Println("\trf.log: ", rf.log);
 	}
 
 	rf.log = rf.log[:args.PrevLogIndex+1];
@@ -451,12 +457,16 @@ func (rf *Raft) sendAppendEntries(peerIndex int, args *AppendEntriesArgs) {
 		//5//fmt.Println(rf.me, " transmitting to ", peerIndex, "\n\targs: ", args);
 	}
 
+	rf.lock();
+	snapshotTerm := rf.currentTerm; //snapshot the leader's term before calling AppendEntries
+	//this is to make sure the leader didn't become leader again later with a later term and handles the reply of an AppendEntries sent when it was leader on an older term
+	rf.unlock();
+
 	successfulCall := rf.peers[peerIndex].Call("Raft.AppendEntries", args, &finalReply);
 
 	rf.lock();
 
-	//TODO, make sure snapshotted term = current term (make sure leader didn't become leader again later with a later term)
-	if rf.state == "leader" && successfulCall {
+	if rf.state == "leader" && snapshotTerm == rf.currentTerm && successfulCall { //snapshotTerm == rf.currentTerm ensures we don't handle stale replies
 		if len(args.Entries) > 0 {
 			//5//fmt.Println(rf.me, " successfully called append entries on ", peerIndex);
 		}
@@ -480,7 +490,7 @@ func (rf *Raft) sendAppendEntries(peerIndex int, args *AppendEntriesArgs) {
 			} else { //rejected for some reason, retry with an older entry
 				rf.unlock();
 				//if (peerIndex == 1) {
-				//5//fmt.Println("IMMEDIATE RETRY:", peerIndex, " rejected from ", rf.me, "\n\targs: ", args, "\n\told rf.nextIndex[peerIndex]: ", rf.nextIndex[peerIndex]);
+				fmt.Println("Rejected for some reaosn. IMMEDIATE RETRY:", peerIndex, " rejected from ", rf.me, "\n\targs: ", args, "\n\told rf.nextIndex[peerIndex]: ", rf.nextIndex[peerIndex]);
 				//}
 
 				////5//fmt.Println("REJECTED rf.nextIndex[peerIndex] changed to: ", rf.nextIndex[peerIndex], ", with rf.log.length: ", len(rf.log));
@@ -612,8 +622,8 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 					args.LeaderId = rf.me;
 					////5//fmt.Println("rf.nextIndex: ", rf.nextIndex);
 					////5//fmt.Println("peerIndex: ", peerIndex);
-					args.PrevLogIndex = rf.nextIndex[peerIndex] - 1; //we subtract 1 more because we already appended the new command
-					////5//fmt.Println("START", rf.me, "'s args.PrevLogIndex: ", args.PrevLogIndex, " for ", peerIndex);
+					args.PrevLogIndex = rf.nextIndex[peerIndex] - 1;
+					//5//fmt.Println("START", rf.me, "'s args.PrevLogIndex: ", args.PrevLogIndex, " for ", peerIndex);
 					args.PrevLogTerm = 0;
 					if args.PrevLogIndex >= 0 {
 						args.PrevLogTerm = rf.log[args.PrevLogIndex].Term;
