@@ -19,6 +19,8 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 	return
 }
 
+timeOutFactor := 500;
+
 
 type Op struct {
 	// Your definitions here.
@@ -50,7 +52,7 @@ type RaftKV struct {
 			number has already been executed, it responds immediately
 			without re-executing the request.
 		*/
-	res map[int] chan Op
+	result map[int] chan Op
 }
 
 
@@ -69,15 +71,17 @@ func (kv *RaftKV) Get(args *GetArgs, reply *GetReply) {
 
 	index, _, isLeader := kv.rf.Start(op); //don't care about term
 	if isLeader {
+
 		kv.mu.Lock();
-		_, ok := kv.res[index];
+		channel, ok := kv.result[index];
 		if !ok {
-			kv.res[index] = make(chan Op, 1);
+			channel = make(chan Op, 1);
+			kv.result[index] = channel;
 		}
 		kv.mu.Unlock();
 
 		select {
-			case receivedOp := <- kv.res[index]:
+			case receivedOp := <- channel:
 				if receivedOp == op {
 					reply.WrongLeader = false;
 					kv.mu.Lock();
@@ -86,13 +90,13 @@ func (kv *RaftKV) Get(args *GetArgs, reply *GetReply) {
 				} else {
 					reply.Err = "Error";
 				}
-			case <- time.After(time.Duration(500)*time.Millisecond):
+			case <- time.After(time.Duration(timeOutFactor)*time.Millisecond):
 				reply.Err = "TimeOut";
 		}
 	}
 
 	kv.mu.Lock();
-	delete(kv.res, index);
+	delete(kv.result, index);
 	kv.mu.Unlock();
 }
 
@@ -111,26 +115,27 @@ func (kv *RaftKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	index, _, isLeader := kv.rf.Start(op); //don't care about term
 	if isLeader {
 		kv.mu.Lock();
-		_, ok := kv.res[index];
+		channel, ok := kv.result[index];
 		if !ok {
-			kv.res[index] = make(chan Op, 1);
+			channel = make(chan Op, 1);
+			kv.result[index] = channel;
 		}
 		kv.mu.Unlock();
 
 		select {
-			case receivedOp := <- kv.res[index]:
+			case receivedOp := <- channel:
 				if receivedOp == op {
 					reply.WrongLeader = false;
 				} else {
 					reply.Err = "Error";
 				}
-			case <- time.After(time.Duration(500)*time.Millisecond):
+			case <- time.After(time.Duration(timeOutFactor)*time.Millisecond):
 				reply.Err = "TimeOut";
 		}
 	}
 
 	kv.mu.Lock();
-	delete(kv.res, index);
+	delete(kv.result, index);
 	kv.mu.Unlock();
 }
 
@@ -176,36 +181,33 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 
 	kv.keyValueMap = make(map[string]string);
 	kv.commandMap = make(map[int64]int);
-	kv.res = make(map[int] chan Op);
+	kv.result = make(map[int] chan Op);
 
 	go func() {
 		for {
-			select {
-			case msg := <- kv.applyCh:
-				op, ok := msg.Command.(Op);
-				if ok {
-					kv.mu.Lock();
+			msg := <- kv.applyCh; //block until receive an ApplyMsg
+			op, ok := msg.Command.(Op);
+			if ok {
+				kv.mu.Lock();
 
-					if op.SequenceNumber > kv.commandMap[op.ClientId] {
-						if op.Action == "Put" {
-							kv.keyValueMap[op.Key] = op.Value;
-						} else if op.Action == "Append" {
-							kv.keyValueMap[op.Key] = kv.keyValueMap[op.Key] + op.Value;
-						}
-						kv.commandMap[op.ClientId] = op.SequenceNumber; //update the sequence number
+				if op.SequenceNumber > kv.commandMap[op.ClientId] {
+					if op.Action == "Put" {
+						kv.keyValueMap[op.Key] = op.Value;
+					} else if op.Action == "Append" {
+						kv.keyValueMap[op.Key] = kv.keyValueMap[op.Key] + op.Value;
 					}
-
-					_, channelExists := kv.res[msg.Index];
-
-					if channelExists {
-						kv.res[msg.Index] <- op;
-					} else {
-						kv.res[msg.Index] = make(chan Op, 1);
-					}
-					
-					kv.mu.Unlock();
+					kv.commandMap[op.ClientId] = op.SequenceNumber; //update the sequence number
 				}
-				
+
+				_, channelExists := kv.result[msg.Index];
+
+				if channelExists {
+					kv.result[msg.Index] <- op;
+				} else {
+					kv.result[msg.Index] = make(chan Op, 1);
+				}
+
+				kv.mu.Unlock();
 			}
 		}
 	}();

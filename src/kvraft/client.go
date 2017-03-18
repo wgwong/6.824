@@ -101,10 +101,19 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 	ck.mu.Unlock();
 
 	for {
+		if ck.leaderId != -1 {
+			var reply PutAppendReply;
+			ok := ck.servers[ck.leaderId].Call("RaftKV.PutAppend", &args, &reply);
+			if ok && !reply.WrongLeader {
+				return;
+			}
+		}
+
 		for i := 0; i < len(ck.servers); i++ {
 			var reply PutAppendReply;
 			ok := ck.servers[i].Call("RaftKV.PutAppend", &args, &reply);
 			if ok && !reply.WrongLeader {
+				ck.leaderId = i;
 				return;
 			}
 		}
