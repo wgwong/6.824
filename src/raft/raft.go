@@ -1,7 +1,3 @@
-//safe
-//before changing requestvote rpc
-
-
 package raft
 
 //
@@ -29,7 +25,6 @@ import (
 	"bytes"
 	"encoding/gob"
 	"sort"
-	//"fmt"
 )
 
 
