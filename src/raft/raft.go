@@ -648,6 +648,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 
 		//transmit LogEntry to other rafts
 		//repCountingChannel := make(chan bool, 100);
+		/*
 		for i := 0; i < len(rf.peers); i++ {
 			if i != rf.me {
 				go func (peerIndex int) {
@@ -676,11 +677,12 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 					rf.unlock();
 					////5//fmt.Println(rf.me, " about to sendAppendEntries to ", peerIndex, " with args: ", args);
 
+
 					DPrintf("[START]", rf.me, " sending (start) sendappendentries to ", peerIndex, ", entries (last 10): ", args.Entries[max(0, len(args.Entries)-11):len(args.Entries)], ", rf.log (last 10): ",rf.log[max(0, len(rf.log)-11):len(rf.log)], ", rf.nextIndex[",peerIndex,"]: ", rf.nextIndex[peerIndex]);
 					rf.sendAppendEntries(peerIndex, &args);
 				}(i);
 			}
-		}
+		}*/
 	}
 
 	index = index + 1; //needs to be 1-indexed apparently
@@ -767,8 +769,8 @@ func stateChecker(rf *Raft) {
 								args.Entries = rf.log[rf.nextIndex[i]:];
 							}
 							args.LeaderCommit = rf.commitIndex;
-							rf.unlock();
 							DPrintf("[HEARTBEAT]", rf.me, " sending heartbeat to ", i, ", entries (last 10): ", args.Entries[max(0, len(args.Entries)-11):len(args.Entries)], ", rf.log (last 10): ",rf.log[max(0, len(rf.log)-11):len(rf.log)], ", rf.nextIndex[",i,"]: ", rf.nextIndex[i]);
+							rf.unlock();
 							go rf.sendAppendEntries(i, &args);
 						}
 					}
