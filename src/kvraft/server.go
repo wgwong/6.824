@@ -19,8 +19,7 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 	return
 }
 
-timeOutFactor := 500;
-
+const timeOutFactor = 500;
 
 type Op struct {
 	// Your definitions here.
