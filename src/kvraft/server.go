@@ -7,7 +7,8 @@ import (
 	"raft"
 	"sync"
 	"time"
-	//"fmt"
+	"bytes"
+	"fmt"
 )
 
 const Debug = 0
@@ -167,6 +168,10 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	// Go's RPC library to marshall/unmarshall.
 	gob.Register(Op{});
 
+	if false {
+		fmt.Println("filler");
+	}
+
 	kv := new(RaftKV);
 	kv.me = me;
 	kv.maxraftstate = maxraftstate;
@@ -176,8 +181,6 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.applyCh = make(chan raft.ApplyMsg);
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh);
 
-	// You may need initialization code here.
-
 	kv.keyValueMap = make(map[string]string);
 	kv.commandMap = make(map[int64]int);
 	kv.result = make(map[int] chan Op);
@@ -185,28 +188,61 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	go func() {
 		for {
 			msg := <- kv.applyCh; //block until receive an ApplyMsg
-			op, ok := msg.Command.(Op);
-			if ok {
+
+			if msg.UseSnapshot == true {
+				var lastIncludedIndex int;
+				var lastIncludedTerm int;
+
+				decoder := gob.NewDecoder(bytes.NewBuffer(msg.Snapshot));
+
 				kv.mu.Lock();
+				decoder.Decode(&lastIncludedIndex);
+				decoder.Decode(&lastIncludedTerm);
 
-				if op.SequenceNumber > kv.commandMap[op.ClientId] {
-					if op.Action == "Put" {
-						kv.keyValueMap[op.Key] = op.Value;
-					} else if op.Action == "Append" {
-						kv.keyValueMap[op.Key] = kv.keyValueMap[op.Key] + op.Value;
-					}
-					kv.commandMap[op.ClientId] = op.SequenceNumber; //update the sequence number
-				}
+				//is this necessary
+				kv.keyValueMap = make(map[string]string);
+				kv.commandMap = make(map[int64]int);
 
-				_, channelExists := kv.result[msg.Index];
-
-				if channelExists {
-					kv.result[msg.Index] <- op;
-				} else {
-					kv.result[msg.Index] = make(chan Op, 1);
-				}
+				decoder.Decode(&kv.keyValueMap);
+				decoder.Decode(&kv.commandMap);
 
 				kv.mu.Unlock();
+
+			} else {
+				op, ok := msg.Command.(Op);
+				if ok {
+					kv.mu.Lock();
+
+					if op.SequenceNumber > kv.commandMap[op.ClientId] {
+						if op.Action == "Put" {
+							kv.keyValueMap[op.Key] = op.Value;
+						} else if op.Action == "Append" {
+							kv.keyValueMap[op.Key] = kv.keyValueMap[op.Key] + op.Value;
+						}
+						kv.commandMap[op.ClientId] = op.SequenceNumber; //update the sequence number
+					}
+
+					_, channelExists := kv.result[msg.Index];
+
+					if channelExists {
+						kv.result[msg.Index] <- op;
+					} else {
+						kv.result[msg.Index] = make(chan Op, 1);
+					}
+
+					if maxraftstate > 0 && kv.rf.RaftStateSize() > maxraftstate {
+
+						//fmt.Println("for server ", me, ", kv.rf.RaftStateSize() currently: ", kv.rf.RaftStateSize(), " calling CommitSnapshot");
+
+						buffer := new(bytes.Buffer);
+						encoder := gob.NewEncoder(buffer);
+						encoder.Encode(kv.keyValueMap);
+						encoder.Encode(kv.commandMap);
+						go kv.rf.CreateSnapshot(buffer.Bytes(), msg.Index);
+					}
+
+					kv.mu.Unlock();
+				}
 			}
 		}
 	}();
