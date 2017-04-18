@@ -11,7 +11,8 @@ import "math/big"
 
 type Clerk struct {
 	servers []*labrpc.ClientEnd
-	// Your data here.
+	
+	leaderId int
 }
 
 func nrand() int64 {
