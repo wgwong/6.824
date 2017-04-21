@@ -13,12 +13,17 @@ import (
 
 type Clerk struct {
 	servers []*labrpc.ClientEnd
+<<<<<<< HEAD
 	// Your data here.
 	clientId int64
 
 	mu sync.Mutex
 	leaderId int
 	sequenceNumber int
+=======
+	
+	leaderId int
+>>>>>>> 96634857887da28bfbf6d4d664c7512b90da5546
 }
 
 func nrand() int64 {
