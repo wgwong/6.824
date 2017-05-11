@@ -15,6 +15,14 @@ type Op struct {
 	// otherwise RPC will break.
 }
 
+/*
+type OpReply struct {
+	Action string
+	Args interface{}
+	Reply interface{}
+}
+*/
+
 type ShardKV struct {
 	mu           sync.Mutex
 	me           int

@@ -13,6 +13,7 @@ import "crypto/rand"
 import "math/big"
 import "shardmaster"
 import "time"
+import "sync"
 
 //
 // which shard is a key in?
@@ -40,6 +41,11 @@ type Clerk struct {
 	config   shardmaster.Config
 	make_end func(string) *labrpc.ClientEnd
 	// You will have to modify this struct.
+	clientId int64
+
+	mu sync.Mutex
+	leaderId int
+	sequenceNumber int
 }
 
 //
@@ -56,6 +62,9 @@ func MakeClerk(masters []*labrpc.ClientEnd, make_end func(string) *labrpc.Client
 	ck.sm = shardmaster.MakeClerk(masters)
 	ck.make_end = make_end
 	// You'll have to add code here.
+	ck.clientId = nrand();
+	ck.leaderId = -1;
+	ck.sequenceNumber = 0;
 	return ck
 }
 
@@ -68,6 +77,13 @@ func MakeClerk(masters []*labrpc.ClientEnd, make_end func(string) *labrpc.Client
 func (ck *Clerk) Get(key string) string {
 	args := GetArgs{}
 	args.Key = key
+
+	args.ClientId = ck.clientId;
+
+	ck.mu.Lock();
+	ck.sequenceNumber = ck.sequenceNumber + 1;
+	args.SequenceNumber = ck.sequenceNumber;
+	ck.mu.Unlock();
 
 	for {
 		shard := key2shard(key)
@@ -103,7 +119,12 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 	args.Key = key
 	args.Value = value
 	args.Op = op
+	args.ClientId = ck.clientId;
 
+	ck.mu.Lock();
+	ck.sequenceNumber = ck.sequenceNumber + 1;
+	args.SequenceNumber = ck.sequenceNumber;
+	ck.mu.Unlock();
 
 	for {
 		shard := key2shard(key)

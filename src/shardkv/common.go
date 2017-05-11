@@ -26,6 +26,8 @@ type PutAppendArgs struct {
 	// You'll have to add definitions here.
 	// Field names must start with capital letters,
 	// otherwise RPC will break.
+	ClientId int64
+	SequenceNumber int
 }
 
 type PutAppendReply struct {
@@ -36,6 +38,8 @@ type PutAppendReply struct {
 type GetArgs struct {
 	Key string
 	// You'll have to add definitions here.
+	ClientId int64
+	SequenceNumber int
 }
 
 type GetReply struct {
@@ -43,3 +47,28 @@ type GetReply struct {
 	Err         Err
 	Value       string
 }
+
+/*
+type TransferShardArgs struct {
+	// You'll have to add definitions here.
+	Shards []int
+	ConfigNum int
+}
+
+type TransferShardReply struct {
+	Err         Err
+	Transferred [shardmaster.NShards]map[string]string
+	ClientRequests map[int64]int64
+}
+
+type ReConfigArgs struct {
+	// You'll have to add definitions here.
+	Kvs [shardmaster.NShards]map[string]string
+	ClientRequests map[int64]int64
+	NewConfig shardmaster.Config
+}
+
+type ReConfigReply struct {
+	Err         Err
+}
+*/
