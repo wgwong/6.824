@@ -5,8 +5,8 @@ import (
 	"labrpc"
 	"sync"
 	"encoding/gob"
-	"sort"
 	"time"
+	"os"
 )
 
 type ShardMaster struct {
@@ -22,7 +22,6 @@ type ShardMaster struct {
 	result map[int] chan OpReply
 	commandMap map[int64] int;
 }
-
 
 type Op struct {
 	SequenceNumber int
@@ -80,13 +79,12 @@ func (sm *ShardMaster) Join(args *JoinArgs, reply *JoinReply) {
 			opReply.Err = "TimeOut";
 		}
 	}
-
 	sm.mu.Lock();
 	delete(sm.result, index);
 	sm.mu.Unlock();
 
-	reply.WrongLeader = opReply.WrongLeader;
-	reply.Err = "";
+	reply.WrongLeader = opReply.WrongLeader
+	reply.Err = ""
 }
 
 func (sm *ShardMaster) Leave(args *LeaveArgs, reply *LeaveReply) {
@@ -224,13 +222,60 @@ func (sm *ShardMaster) Query(args *QueryArgs, reply *QueryReply) {
 // turn off debug output from this instance.
 //
 func (sm *ShardMaster) Kill() {
-	sm.rf.Kill()
+	sm.rf.Kill();
 	// Your code here, if desired.
 }
 
 // needed by shardkv tester
 func (sm *ShardMaster) Raft() *raft.Raft {
-	return sm.rf
+	return sm.rf;
+}
+
+func (sm *ShardMaster) RebalanceConfig(config *Config, action string, gid int) {
+	shardsCount := map[int][]int{};
+	for k := range config.Groups {
+		shardsCount[k] = []int{};
+	}
+	for k, v := range config.Shards {
+		shardsCount[v] = append(shardsCount[v], k);
+	}
+
+	if action == "Join" {
+		for i := 0; i < NShards/len(config.Groups); i++ {
+			max := -1;
+			maxGid := 0;
+
+			for g, shards := range shardsCount {
+				if max < len(shards) {
+					max = len(shards);
+					maxGid = g;
+				}
+			}
+
+			if len(shardsCount[maxGid]) == 0 {
+				os.Exit(-1);
+			}
+			config.Shards[shardsCount[maxGid][0]] = gid;
+			shardsCount[maxGid] = shardsCount[maxGid][1:];
+		}
+	} else if action == "Leave" {
+		delShards := shardsCount[gid];
+		delete(shardsCount, gid);
+		for _,shard := range delShards {
+			min := -1;
+			minGid := 0;
+
+			for g, shards := range shardsCount {
+				if min > len(shards) || min == -1 {
+					min = len(shards);
+					minGid = g;
+				}
+			}
+
+			config.Shards[shard] = minGid;
+			shardsCount[minGid] = append(shardsCount[minGid],shard);
+		}
+	}
 }
 
 //
@@ -269,6 +314,7 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister)
 					opReply.SequenceNumber = op.SequenceNumber;
 					opReply.WrongLeader = true;
 
+					// execute command
 					if sm.commandMap[op.ClientId] < op.SequenceNumber {
 						if op.Action == "Join" {
 							opReply.WrongLeader = false;
@@ -288,18 +334,12 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister)
 							}
 
 							//join
-							for key, val := range op.Servers {
-								newConfig.Groups[key] = val;
-							}
-
-							var gidList [] int;
-							for k := range newConfig.Groups {
-								gidList = append(gidList, k)
-							}
-							sort.Ints(gidList);
-
-							for i := 0; i < len(newConfig.Shards); i++ {
-								newConfig.Shards[i] = gidList[i % len(gidList)];
+							for gid, servers := range op.Servers {
+								_, found := newConfig.Groups[gid];
+								if !found {
+									newConfig.Groups[gid] = servers;
+									sm.RebalanceConfig(&newConfig, "Join", gid);
+								}
 							}
 
 							sm.configs = append(sm.configs, newConfig);
@@ -307,7 +347,6 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister)
 						} else if op.Action == "Leave" {
 							opReply.WrongLeader = false;
 
-							//new config
 							var newConfig Config;
 							newConfig.Num = len(sm.configs);
 							newConfig.Shards = [NShards] int{};
@@ -322,21 +361,17 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister)
 							}
 
 							//leave
-							for _, val := range op.GIDs {
-								delete(newConfig.Groups, val);
-							}
-
-							var gidList [] int;
-							for k := range newConfig.Groups {
-								gidList = append(gidList, k)
-							}
-							sort.Ints(gidList);
-
-							for i := 0; i < len(newConfig.Shards); i ++ {
-								newConfig.Shards[i] = gidList[i % len(gidList)];
+							for _, gid := range op.GIDs {
+								_, found := newConfig.Groups[gid];
+								if found {
+									delete(newConfig.Groups, gid);
+									sm.RebalanceConfig(&newConfig, "Leave", gid);
+								}
 							}
 
 							sm.configs = append(sm.configs, newConfig);
+
+
 
 						} else if op.Action == "Move" {
 							opReply.WrongLeader = false;
@@ -359,8 +394,10 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister)
 							newConfig.Shards[op.Shard] = op.GID;
 							sm.configs = append(sm.configs, newConfig);
 
+
 						} else if op.Action == "Query" {
 							opReply.WrongLeader = false;
+
 							num := op.Num;
 							if num >= len(sm.configs) || num == -1 {
 								opReply.Config = sm.configs[len(sm.configs) - 1];
@@ -369,8 +406,7 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister)
 							}
 						}
 
-						sm.commandMap[op.ClientId] = op.SequenceNumber
-
+						sm.commandMap[op.ClientId] = op.SequenceNumber;
 					} else if op.Action == "Query" {
 						num := op.Num;
 						if num >= len(sm.configs) || num == -1 {
@@ -389,11 +425,10 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister)
 					}
 
 					sm.mu.Unlock();
-
 				}
 			}
 		}
-	}();
+	}()
 
 	return sm;
 }

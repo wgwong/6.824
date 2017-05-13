@@ -9,6 +9,8 @@ package shardkv
 // You will have to modify these definitions.
 //
 
+import "shardmaster"
+
 const (
 	OK            = "OK"
 	ErrNoKey      = "ErrNoKey"
@@ -48,9 +50,7 @@ type GetReply struct {
 	Value       string
 }
 
-/*
 type TransferShardArgs struct {
-	// You'll have to add definitions here.
 	Shards []int
 	ConfigNum int
 }
@@ -58,17 +58,15 @@ type TransferShardArgs struct {
 type TransferShardReply struct {
 	Err         Err
 	Transferred [shardmaster.NShards]map[string]string
-	ClientRequests map[int64]int64
+	ClientRequests map[int64]int
 }
 
 type ReConfigArgs struct {
-	// You'll have to add definitions here.
 	Kvs [shardmaster.NShards]map[string]string
-	ClientRequests map[int64]int64
+	ClientRequests map[int64]int
 	NewConfig shardmaster.Config
 }
 
 type ReConfigReply struct {
 	Err         Err
 }
-*/
